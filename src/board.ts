@@ -1,3 +1,5 @@
+// eslint-disable-next-line import/no-extraneous-dependencies
+import chalk from 'chalk';
 import {
   Ship,
 } from './models/ship';
@@ -15,8 +17,8 @@ export class Board {
 
   createEmptyBoard() {
     return Array.from({
-      length: this.size,
-    }, () => Array(this.size).fill(' '));
+      length: +this.size,
+    }, () => Array(+this.size).fill(' '));
   }
 
   printBoard() {
@@ -24,9 +26,9 @@ export class Board {
       length: this.size,
     }, (_, i) => String.fromCharCode('A'.charCodeAt(0) + i));
 
-    console.log(`\x1b[4m |${colLabels.join('|')}|\x1b[0m`);
+    console.log(chalk.green.bgWhite.underline(` |${colLabels.join('|')}|`));
     this.board.forEach((row, i) => {
-      console.log(`\x1b[4m${i}|${row.join('|')}|\x1b[0m`);
+      console.log(chalk.underline(`${chalk.green.bgWhite(`${i}|`)}${row.join('|')}|`));
     });
   }
 
@@ -38,5 +40,11 @@ export class Board {
 
   isValidPlacement(ship: Ship) {
     return ship.coordinates.every(({ row, col }) => this.board[row][col] === ' ' && row <= this.size && col <= this.size);
+  }
+
+  removeShip(ship: Ship) {
+    ship.coordinates.forEach(({ row, col }) => {
+      this.board[row][col] = ' ';
+    });
   }
 }

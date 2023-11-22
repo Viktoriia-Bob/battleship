@@ -1,10 +1,16 @@
 import inquirer from 'inquirer';
+import chalk from 'chalk';
 import {
   Player,
 } from './models/player';
 import {
   Board,
 } from './board';
+import {
+  BoardSize,
+} from './constants';
+
+type BoardSizeType = typeof BoardSize;
 
 export class Game {
   boardSize = 10;
@@ -13,9 +19,15 @@ export class Game {
 
   player2: Player;
 
-  shipSizes = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1];
+  shipSizes = [4, 4];
 
-  async startGame() {
+  async startGame(boardSize: number) {
+    this.boardSize = boardSize;
+    const key = boardSize as keyof BoardSizeType;
+    if (key in BoardSize) {
+      this.shipSizes = BoardSize[key].ships;
+    }
+
     const player1Name = await inquirer.prompt([{
       type: 'input',
       name: 'name',
@@ -83,6 +95,21 @@ export class Game {
         })) {
           ship.coordinates = coordinates;
           player.board.placeShip(ship);
+
+          console.clear();
+          console.log('This is what your board looks like now, would you like to continue?');
+          player.board.printBoard();
+          const response = await inquirer.prompt({
+            type: 'list',
+            name: 'select',
+            choices: ['Yes, continue', 'Cancel the last ship'],
+          });
+
+          if (response.select === 'Cancel the last ship') {
+            player.board.removeShip(ship);
+            continue;
+          }
+
           break;
         } else {
           console.log('Invalid placement. Try again.');
@@ -97,7 +124,7 @@ export class Game {
         type: 'input',
         name: 'coordinates',
         message: `${player.name}, enter the coordinates for your hit (e.g., A:1 or B:2):`,
-        validate: (value) => /^[A-Ja-j]:[0-9]$/.test(value),
+        validate: (value) => (/^[A-Ja-j]:[0-9]$/.test(value) ? true : 'Please enter a valid coordinates!'),
       },
     ]);
 
@@ -115,7 +142,7 @@ export class Game {
         type: 'input',
         name: 'coordinates',
         message: `${player.name}, enter the coordinates for ship with size ${size} (e.g., A:1 or B:2):`,
-        validate: (value) => /^[A-Ja-j]:[0-9]$/.test(value),
+        validate: (value) => (/^[A-Ja-j]:[0-9]$/.test(value) ? true : 'Please enter a valid coordinates!'),
       },
     ]);
 
@@ -143,76 +170,95 @@ export class Game {
   }
 
   isGameOver(player: Player) {
-    return player.ships.every((ship) => ship.coordinates.every(({ row, col }) => player.board.board[row][col] === 'X'));
+    return player.ships.every((ship) => ship.coordinates.every(({ row, col }) => {
+      console.log(player.board.board[row][col]);
+      return player.board.board[row][col] === chalk.red('█');
+    }));
+  }
+
+  async gameStep(player: Player, enemy: Player) {
+    console.clear();
+    console.log(`${player.name}'s turn:`);
+    player.enemyBoard.printBoard();
+
+    const shot = await this.getPlayerInput(player);
+
+    console.clear();
+    if (enemy.board.board[shot.row][shot.col] === '█') {
+      player.enemyBoard.board[shot.row][shot.col] = 'X';
+      enemy.board.board[shot.row][shot.col] = chalk.red('█');
+
+      player.enemyBoard.printBoard();
+      console.log('Hit!');
+    } else {
+      player.enemyBoard.board[shot.row][shot.col] = 'O';
+      enemy.board.board[shot.row][shot.col] = 'O';
+
+      player.enemyBoard.printBoard();
+      console.log('Miss!');
+    }
+
+    if (this.isGameOver(enemy)) {
+      console.clear();
+      enemy.board.printBoard();
+      console.log(`${player.name} wins!`);
+      return true;
+    }
+
+    await inquirer.prompt({
+      type: 'input',
+      name: 'enter',
+      message: 'Press Enter for next turn.',
+    });
+
+    return false;
   }
 
   async playGame() {
     while (true) {
-      console.clear();
-      console.log(`${this.player1.name}'s turn:`);
-      this.player1.enemyBoard.printBoard();
+      console.log(`${this.player1.name}, what do you want to do?`);
+      const response1 = await inquirer.prompt([{
+        type: 'list',
+        name: 'isShowBoard',
+        choices: ['Show my board', chalk.red('Destroy the enemy!')],
+      }]);
 
-      const shot1 = await this.getPlayerInput(this.player1);
-
-      console.clear();
-      if (this.player2.board.board[shot1.row][shot1.col] === '█') {
-        this.player1.enemyBoard.board[shot1.row][shot1.col] = 'X';
-        this.player2.board.board[shot1.row][shot1.col] = 'X';
-
-        this.player1.enemyBoard.printBoard();
-        console.log('Hit!');
-      } else {
-        this.player1.enemyBoard.board[shot1.row][shot1.col] = 'O';
-        this.player2.board.board[shot1.row][shot1.col] = 'O';
-
-        this.player1.enemyBoard.printBoard();
-        console.log('Miss!');
-      }
-
-      if (this.isGameOver(this.player2)) {
+      if (response1.isShowBoard === 'Show my board') {
         console.clear();
-        console.log(`${this.player1.name} wins!`);
-        break;
+        console.log('Here is your board:');
+        this.player1.board.printBoard();
+
+        await inquirer.prompt({
+          type: 'input',
+          name: 'enter',
+          message: 'Press Enter for next turn.',
+        });
       }
 
-      await inquirer.prompt({
-        type: 'input',
-        name: 'enter',
-        message: 'Press Enter for next turn.',
-      });
+      const isEnd = await this.gameStep(this.player1, this.player2);
+      if (isEnd) break;
 
-      console.clear();
-      console.log(`${this.player2.name}'s turn:`);
-      this.player2.enemyBoard.printBoard();
+      console.log(`${this.player2.name}, what do you want to do?`);
+      const response2 = await inquirer.prompt([{
+        type: 'list',
+        name: 'isShowBoard',
+        choices: ['Show my board', chalk.red('Destroy the enemy!')],
+      }]);
 
-      const shot2 = await this.getPlayerInput(this.player2);
-
-      console.clear();
-      if (this.player1.board.board[shot2.row][shot2.col] === '█') {
-        this.player2.enemyBoard.board[shot2.row][shot2.col] = 'X';
-        this.player1.board.board[shot2.row][shot2.col] = 'X';
-
-        this.player2.enemyBoard.printBoard();
-        console.log('Hit!');
-      } else {
-        this.player2.enemyBoard.board[shot2.row][shot2.col] = 'O';
-        this.player1.board.board[shot2.row][shot2.col] = 'O';
-
-        this.player2.enemyBoard.printBoard();
-        console.log('Miss!');
-      }
-
-      if (this.isGameOver(this.player1)) {
+      if (response2.isShowBoard === 'Show my board') {
         console.clear();
-        console.log(`${this.player2.name} wins!`);
-        break;
+        console.log('Here is your board:');
+        this.player2.board.printBoard();
+
+        await inquirer.prompt({
+          type: 'input',
+          name: 'enter',
+          message: 'Press Enter for next turn.',
+        });
       }
 
-      await inquirer.prompt({
-        type: 'input',
-        name: 'enter',
-        message: 'Press Enter for next turn.',
-      });
+      const isEnd2 = await this.gameStep(this.player2, this.player1);
+      if (isEnd2) break;
     }
   }
 }
