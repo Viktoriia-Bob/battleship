@@ -2,17 +2,21 @@
 import chalk from 'chalk';
 import {
   Ship,
-} from './models/ship';
+} from './models';
 
 export class Board {
   size = 8;
 
   board: string[][] = [];
 
-  constructor(size: number) {
+  constructor(size: number, board?: string[][]) {
     this.size = size;
 
-    this.board = this.createEmptyBoard();
+    if (board) {
+      this.board = board;
+    } else {
+      this.board = this.createEmptyBoard();
+    }
   }
 
   createEmptyBoard() {

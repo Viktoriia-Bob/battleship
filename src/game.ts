@@ -1,14 +1,28 @@
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import {
-  Player,
-} from './models/player';
-import {
   Board,
 } from './board';
 import {
   BoardSize,
+  ConfirmPositionEnum,
+  MessagesEnum,
+  OrientationEnum,
+  PlayerActions,
+  RedisEnum,
 } from './constants';
+import {
+  CoordinatesInput,
+  ListInput,
+  Player,
+  NameInput,
+} from './models';
+import {
+  RedisConnection,
+} from './redis-connection';
+import {
+  PreviousState,
+} from './models/previous-state';
 
 type BoardSizeType = typeof BoardSize;
 
@@ -21,23 +35,32 @@ export class Game {
 
   shipSizes = [4, 4];
 
-  async startGame(boardSize: number) {
+  gameTitle: string;
+
+  redisConnection: RedisConnection;
+
+  constructor(gameTitle: string, redisConnection: RedisConnection) {
+    this.gameTitle = gameTitle;
+    this.redisConnection = redisConnection;
+  }
+
+  async startNewGame(boardSize: number) {
     this.boardSize = boardSize;
     const key = boardSize as keyof BoardSizeType;
     if (key in BoardSize) {
       this.shipSizes = BoardSize[key].ships;
     }
 
-    const player1Name = await inquirer.prompt([{
+    const player1Name = await inquirer.prompt<NameInput>([{
       type: 'input',
       name: 'name',
-      message: 'Enter Player 1 name:',
+      message: MessagesEnum.ENTER_PLAYER_1_NAME,
     }]);
 
-    const player2Name = await inquirer.prompt([{
+    const player2Name = await inquirer.prompt<NameInput>([{
       type: 'input',
       name: 'name',
-      message: 'Enter Player 2 name:',
+      message: MessagesEnum.ENTER_PLAYER_2_NAME,
     }]);
 
     this.player1 = {
@@ -70,6 +93,31 @@ export class Game {
     await this.playGame();
   }
 
+  async continueGame() {
+    const previousStateJson = await this.redisConnection.get(this.gameTitle);
+
+    if (!previousStateJson) {
+      console.log('Something wrong with this game session');
+      return;
+    }
+
+    const previousState = JSON.parse(previousStateJson) as PreviousState;
+
+    this.player1 = {
+      ...previousState.player1,
+      board: new Board(previousState.player1.board.size, previousState.player1.board.board),
+      enemyBoard: new Board(previousState.player1.enemyBoard.size, previousState.player1.enemyBoard.board),
+    };
+    this.player2 = {
+      ...previousState.player2,
+      board: new Board(previousState.player2.board.size, previousState.player2.board.board),
+      enemyBoard: new Board(previousState.player2.enemyBoard.size, previousState.player2.enemyBoard.board),
+    };
+
+    console.clear();
+    await this.playGame();
+  }
+
   async placeShips(player: Player) {
     console.log(`${player.name}, place your ships on the board:`);
 
@@ -81,7 +129,7 @@ export class Game {
 
         const coordinates = Array.from({
           length: ship.size,
-        }, (_, index) => (start.orientation === 'horizontal' ? {
+        }, (_, index) => (start.orientation === OrientationEnum.HORIZONTAL ? {
           row: start.row,
           col: start.col + index,
         } : {
@@ -97,34 +145,34 @@ export class Game {
           player.board.placeShip(ship);
 
           console.clear();
-          console.log('This is what your board looks like now, would you like to continue?');
+          console.log(MessagesEnum.QUESTION_AFTER_PLACE_SHIP);
           player.board.printBoard();
-          const response = await inquirer.prompt({
+          const response = await inquirer.prompt<ListInput>({
             type: 'list',
             name: 'select',
-            choices: ['Yes, continue', 'Cancel the last ship'],
+            choices: [ConfirmPositionEnum.CONFIRM_POSITION, ConfirmPositionEnum.CANCEL_POSITION],
           });
 
-          if (response.select === 'Cancel the last ship') {
+          if (response.select === ConfirmPositionEnum.CANCEL_POSITION) {
             player.board.removeShip(ship);
             continue;
           }
 
           break;
         } else {
-          console.log('Invalid placement. Try again.');
+          console.log(MessagesEnum.INVALID_PLACEMENT);
         }
       }
     }
   }
 
   async getPlayerInput(player: Player) {
-    const response = await inquirer.prompt([
+    const response = await inquirer.prompt<CoordinatesInput>([
       {
         type: 'input',
         name: 'coordinates',
         message: `${player.name}, enter the coordinates for your hit (e.g., A:1 or B:2):`,
-        validate: (value) => (/^[A-Ja-j]:[0-9]$/.test(value) ? true : 'Please enter a valid coordinates!'),
+        validate: (value) => (/^[A-Ja-j]:[0-9]$/.test(value) ? true : MessagesEnum.ERROR_VALID_COORDINATES),
       },
     ]);
 
@@ -137,12 +185,12 @@ export class Game {
   }
 
   async getPlayerFirstInput(player: Player, size: number) {
-    const response = await inquirer.prompt([
+    const response = await inquirer.prompt<CoordinatesInput>([
       {
         type: 'input',
         name: 'coordinates',
         message: `${player.name}, enter the coordinates for ship with size ${size} (e.g., A:1 or B:2):`,
-        validate: (value) => (/^[A-Ja-j]:[0-9]$/.test(value) ? true : 'Please enter a valid coordinates!'),
+        validate: (value) => (/^[A-Ja-j]:[0-9]$/.test(value) ? true : MessagesEnum.ERROR_VALID_COORDINATES),
       },
     ]);
 
@@ -157,23 +205,20 @@ export class Game {
   }
 
   async askForShipOrientation() {
-    const response = await inquirer.prompt([
+    const response = await inquirer.prompt<ListInput>([
       {
         type: 'list',
-        name: 'orientation',
+        name: 'select',
         message: 'Select orientation:',
-        choices: ['horizontal', 'vertical'],
+        choices: [OrientationEnum.HORIZONTAL, OrientationEnum.VERTICAL],
       },
     ]);
 
-    return response.orientation;
+    return response.select;
   }
 
   isGameOver(player: Player) {
-    return player.ships.every((ship) => ship.coordinates.every(({ row, col }) => {
-      console.log(player.board.board[row][col]);
-      return player.board.board[row][col] === chalk.red('█');
-    }));
+    return player.ships.every((ship) => ship.coordinates.every(({ row, col }) => player.board.board[row][col] === chalk.red('█')));
   }
 
   async gameStep(player: Player, enemy: Player) {
@@ -202,14 +247,35 @@ export class Game {
       console.clear();
       enemy.board.printBoard();
       console.log(`${player.name} wins!`);
+
+      await this.redisConnection.delete(this.gameTitle);
+
+      const gameTitles = JSON.parse(await this.redisConnection.get(RedisEnum.ALL_TITLES) || '[]');
+
+      const index = gameTitles.indexOf(this.gameTitle);
+      gameTitles.splice(index, 1);
+
+      await this.redisConnection.set(RedisEnum.ALL_TITLES, JSON.stringify(gameTitles));
+
+      await inquirer.prompt({
+        type: 'input',
+        name: 'enter',
+        message: MessagesEnum.MAIN_MENU,
+      });
+
       return true;
     }
 
     await inquirer.prompt({
       type: 'input',
       name: 'enter',
-      message: 'Press Enter for next turn.',
+      message: MessagesEnum.PRESS_ENTER,
     });
+
+    await this.redisConnection.set(this.gameTitle, JSON.stringify({
+      player1: enemy,
+      player2: player,
+    } as PreviousState));
 
     return false;
   }
@@ -217,21 +283,21 @@ export class Game {
   async playGame() {
     while (true) {
       console.log(`${this.player1.name}, what do you want to do?`);
-      const response1 = await inquirer.prompt([{
+      const response1 = await inquirer.prompt<ListInput>([{
         type: 'list',
-        name: 'isShowBoard',
-        choices: ['Show my board', chalk.red('Destroy the enemy!')],
+        name: 'select',
+        choices: [PlayerActions.SHOW_BOARD, chalk.red(PlayerActions.DESTROY_ENEMY)],
       }]);
 
-      if (response1.isShowBoard === 'Show my board') {
+      if (response1.select === PlayerActions.SHOW_BOARD) {
         console.clear();
-        console.log('Here is your board:');
+        console.log(MessagesEnum.SHOW_YOUR_BOARD);
         this.player1.board.printBoard();
 
         await inquirer.prompt({
           type: 'input',
           name: 'enter',
-          message: 'Press Enter for next turn.',
+          message: MessagesEnum.PRESS_ENTER,
         });
       }
 
@@ -239,21 +305,21 @@ export class Game {
       if (isEnd) break;
 
       console.log(`${this.player2.name}, what do you want to do?`);
-      const response2 = await inquirer.prompt([{
+      const response2 = await inquirer.prompt<ListInput>([{
         type: 'list',
-        name: 'isShowBoard',
-        choices: ['Show my board', chalk.red('Destroy the enemy!')],
+        name: 'select',
+        choices: [PlayerActions.SHOW_BOARD, chalk.red(PlayerActions.DESTROY_ENEMY)],
       }]);
 
-      if (response2.isShowBoard === 'Show my board') {
+      if (response2.select === PlayerActions.SHOW_BOARD) {
         console.clear();
-        console.log('Here is your board:');
+        console.log(MessagesEnum.SHOW_YOUR_BOARD);
         this.player2.board.printBoard();
 
         await inquirer.prompt({
           type: 'input',
           name: 'enter',
-          message: 'Press Enter for next turn.',
+          message: MessagesEnum.PRESS_ENTER,
         });
       }
 
