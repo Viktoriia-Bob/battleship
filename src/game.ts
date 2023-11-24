@@ -195,7 +195,8 @@ export class Game {
     ]);
 
     const [col, row] = response.coordinates.toUpperCase().split(':');
-    const orientation = await this.askForShipOrientation();
+    let orientation = '';
+    if (size > 1) orientation = await this.askForShipOrientation();
 
     return {
       row: parseInt(row, 10),

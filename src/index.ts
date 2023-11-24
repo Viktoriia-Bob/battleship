@@ -21,12 +21,12 @@ import {
 } from './redis-connection';
 
 (async () => {
-  console.clear();
-  console.log(chalk.blue.bold(MessagesEnum.GAME_NAME));
   const redisConnection = new RedisConnection();
 
   while (true) {
     console.clear();
+    console.log(chalk.blue.bold(MessagesEnum.GAME_NAME));
+
     const response = await inquirer.prompt<MainMenuInput>([{
       type: 'list',
       name: 'mainMenu',
